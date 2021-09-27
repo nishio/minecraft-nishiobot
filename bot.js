@@ -1,5 +1,5 @@
 require("dotenv").config();
-
+const { Vec3 } = require("vec3");
 const mineflayer = require("mineflayer");
 const pathfinder = require("mineflayer-pathfinder").pathfinder;
 const Movements = require("mineflayer-pathfinder").Movements;
@@ -15,10 +15,17 @@ bot.loadPlugin(pathfinder);
 
 const IN_GAME_NAME = "nishio_hirokazu";
 
+let to_follow = false;
+let to_harvest_wort = false;
+let last_seen = undefined;
+
+let mcData;
+let defaultMove;
 bot.once("spawn", () => {
+  mcData = require("minecraft-data")(bot.version);
+  defaultMove = new Movements(bot, mcData);
+
   bot.chat("🤖 I'm in!");
-  const mcData = require("minecraft-data")(bot.version);
-  const defaultMove = new Movements(bot, mcData);
 
   const goto = (position) => {
     const { x, y, z } = position;
@@ -30,8 +37,6 @@ bot.once("spawn", () => {
     // );
   };
 
-  let to_follow = false;
-  let last_seen = undefined;
   setInterval(() => {
     const target = bot.players[IN_GAME_NAME]?.entity;
     if (target !== undefined) {
@@ -46,6 +51,83 @@ bot.once("spawn", () => {
       goto(last_seen.position);
     }
   }, 1000);
+
+  // from https://github.com/PrismarineJS/mineflayer/blob/master/examples/farmer.js
+  const SEARCH_RADIUS = 20;
+  function blockToSow() {
+    return bot.findBlock({
+      point: bot.entity.position,
+      matching: mcData.blocksByName.soul_sand.id,
+      maxDistance: SEARCH_RADIUS,
+      useExtraInfo: (block) => {
+        const blockAbove = bot.blockAt(block.position.offset(0, 1, 0));
+        return !blockAbove || blockAbove.type === 0;
+      },
+    });
+  }
+
+  function blockToHarvest() {
+    return bot.findBlock({
+      point: bot.entity.position,
+      maxDistance: SEARCH_RADIUS,
+      matching: (block) => {
+        return (
+          block &&
+          block.type === mcData.blocksByName.nether_wart.id &&
+          block.metadata === 3
+        );
+      },
+    });
+  }
+
+  async function harvest_wort() {
+    try {
+      console.log("find to harvest");
+      const toHarvest = blockToHarvest();
+      if (toHarvest) {
+        // console.log("dig", toHarvest);
+        const { x, y, z } = toHarvest.position;
+        const goal = new GoalNear(x, y, z, 2);
+        if (!goal.isEnd(bot.entity.position)) {
+          console.log("go to ", [x, y, z], "from ", bot.entity.position);
+          await bot.pathfinder.goto(goal);
+          console.log("done");
+        }
+        console.log("harvest");
+        await bot.dig(toHarvest);
+      }
+    } catch (e) {
+      console.log(e);
+      setTimeout(sow_wort, 3000);
+      return;
+    }
+    setTimeout(sow_wort, 1000);
+  }
+  async function sow_wort() {
+    try {
+      console.log("find to sow");
+      const toSow = blockToSow();
+      if (toSow) {
+        // console.log("sow", toSow);
+        await bot.equip(mcData.itemsByName.nether_wart.id, "hand");
+        const { x, y, z } = toSow.position;
+        console.log("go to ", [x, y, z]);
+        const goal = new GoalNear(x, y, z, 2);
+        if (!goal.isEnd(bot.entity.position)) {
+          await bot.pathfinder.goto(goal);
+        }
+        console.log("sow");
+        await bot.placeBlock(toSow, new Vec3(0, 1, 0));
+      }
+    } catch (e) {
+      console.log(e);
+      setTimeout(harvest_wort, 3000);
+      return;
+    }
+    setTimeout(harvest_wort, 1000);
+  }
+
+  harvest_wort();
 
   bot.on("chat", (username, message) => {
     if (username === bot.username) return;
@@ -69,6 +151,13 @@ bot.once("spawn", () => {
           bot.chat(to_follow ? "enabled" : "disabled");
         },
       },
+      {
+        text: "harvest wort",
+        onCall: () => {
+          to_harvest_wort = !to_harvest_wort;
+          bot.chat(to_harvest_wort ? "enabled" : "disabled");
+        },
+      },
     ];
 
     commands.forEach((c) => {
@@ -80,38 +169,10 @@ bot.once("spawn", () => {
   });
 });
 
-// from https://github.com/PrismarineJS/mineflayer/blob/master/examples/farmer.js
-let mcData;
-bot.on("inject_allowed", () => {
-  mcData = require("minecraft-data")(bot.version);
-});
-
-function blockToSow() {
-  return bot.findBlock({
-    point: bot.entity.position,
-    matching: mcData.blocksByName.soul_sand.id,
-    maxDistance: 6,
-    useExtraInfo: (block) => {
-      const blockAbove = bot.blockAt(block.position.offset(0, 1, 0));
-      return !blockAbove || blockAbove.type === 0;
-    },
-  });
-}
-
-function blockToHarvest() {
-  return bot.findBlock({
-    point: bot.entity.position,
-    maxDistance: 6,
-    matching: (block) => {
-      return (
-        block &&
-        block.type === mcData.blocksByName.nether_wart.id &&
-        block.metadata === 3
-      );
-    },
-  });
-}
-
 // Log errors and kick reasons:
-bot.on("kicked", console.log);
-bot.on("error", console.log);
+bot.on("kicked", (reason) => {
+  console.log("kicked", reason);
+});
+bot.on("error", (error) => {
+  console.log("error", error);
+});
