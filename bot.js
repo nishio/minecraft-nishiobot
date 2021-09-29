@@ -2,7 +2,6 @@ require("dotenv").config();
 const { Vec3 } = require("vec3");
 const mineflayer = require("mineflayer");
 const pathfinder = require("mineflayer-pathfinder").pathfinder;
-const Movements = require("mineflayer-pathfinder").Movements;
 const { GoalNear, GoalNearXZ } = require("mineflayer-pathfinder").goals;
 
 // in-game name of owner, bot ignores commands from others
@@ -154,7 +153,6 @@ bot.once("spawn", () => {
 });
 
 bot.on("chat", (username, message) => {
-  if (username === bot.username) return;
   if (username !== OWNER_NAME) return;
   commands.forEach((c) => {
     if (message.match(c.text) !== null) {
